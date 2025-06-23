@@ -1,6 +1,6 @@
 cabal-version: 2.2
 
--- This file has been generated from package.yaml by hpack version 0.38.0.
+-- This file has been generated from package.yaml by hpack version 0.37.0.
 --
 -- see: https://github.com/sol/hpack
 
@@ -26,6 +26,10 @@ source-repository head
 library
   exposed-modules:
       Lib
+      Math.Common
+      Math.Mat
+      Math.Vec
+      Notation
   other-modules:
       Paths_neural_network_in_haskell
   autogen-modules:
@@ -35,9 +39,9 @@ library
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
   build-depends:
       base >=4.7 && <5
-    , distributive
     , fin
     , random
+    , template-haskell
     , vec
   default-language: Haskell2010
 
@@ -52,10 +56,10 @@ executable neural-network-in-haskell-exe
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       base >=4.7 && <5
-    , distributive
     , fin
     , neural-network-in-haskell
     , random
+    , template-haskell
     , vec
   default-language: Haskell2010
 
@@ -71,9 +75,9 @@ test-suite neural-network-in-haskell-test
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       base >=4.7 && <5
-    , distributive
     , fin
     , neural-network-in-haskell
     , random
+    , template-haskell
     , vec
   default-language: Haskell2010
