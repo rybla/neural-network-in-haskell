@@ -44,13 +44,19 @@ fill :: a -> Mat m n a
 fill a = Vec.fill (Vec.fill a)
 
 mul :: (SNatI n, Num a) => Mat m n a -> Mat n p a -> Mat m p a
-mul a b = Vec.tabulate \i -> Vec.tabulate \j -> Vec.sum $ Vec.zipWith (*) (a ! i) (Vec.tabulate \k -> b ! k ! j)
+mul a b = tabulate \i j -> Vec.sum $ Vec.zipWith (*) (a ! i) (Vec.tabulate \k -> b ! k ! j)
 
 add :: (Num a) => Mat m n a -> Mat m n a -> Mat m n a
-add a b = Vec.tabulate \i -> Vec.tabulate \j -> (a ! i ! j) + (b ! i ! j)
+add a b = tabulate \i j -> (a ! i ! j) + (b ! i ! j)
+
+addVec :: (Num a) => Mat m n a -> Vec n a -> Mat m n a
+addVec a v = tabulate \i j -> a ! i ! j + v ! j
 
 sub :: (Num a) => Mat m n a -> Mat m n a -> Mat m n a
-sub a b = Vec.tabulate \i -> Vec.tabulate \j -> (a ! i ! j) - (b ! i ! j)
+sub a b = tabulate \i j -> (a ! i ! j) - (b ! i ! j)
 
 log :: (Floating a) => Mat m n a -> Mat m n a
 log = fmap (fmap Prelude.log)
+
+scale :: (Num a) => a -> Vec n1 (Vec n2 a) -> Mat n1 n2 a
+scale x a = tabulate \i j -> x * (a ! i ! j)
