@@ -104,10 +104,18 @@ type HiddenNeurons = [nat|2|]
 
 type OutputNeurons = [nat|1|]
 
+learning_rate = 0.1
+
+n_samples :: forall a. (Num a) => a
+n_samples = Nat.reflectToNum (Proxy @Samples)
+
+target_func :: Float -> Float -> Fin OutputNeurons
+target_func = undefined
+
 main :: IO ()
 main = do
   x :: Mat Samples InputNeurons Float <- Mat.random
-  y :: Vec InputNeurons (Fin OutputNeurons) <- Vec.random
+  y :: Vec Samples (Fin OutputNeurons) <- undefined -- TODO: correct label for features
 
   -- input dimension: D
   -- hidden layer dimension: H
@@ -119,11 +127,17 @@ main = do
   -- first layer biases
   b1 :: Vec HiddenNeurons Float <- Vec.random
 
+  -- output of first layer is w1*x + b1
+
   -- second layer weights
   w2 :: Mat HiddenNeurons OutputNeurons Float <- Mat.random
 
   -- second layer biases
   b2 :: Vec OutputNeurons Float <- Vec.random
+
+  -- output of second layer is w2*(w1*x + b1) + b2
+  -- output of second layer is (w2*w1*x :: Input x Output) + (w2*b1 :: Output) + (b2 :: Output)
+  -- so might as well have one layer
 
   -- forward pass
 
@@ -131,50 +145,155 @@ main = do
   let z1 = (x `Mat.mul` w1) `Mat.addVec` b1
 
   -- first layer activation
-  let a1 = z1 <&&> max 0
+  let relu = (<&&> max 0)
+  -- in this case, relu is the "activation function"
+  let a1 = relu z1
 
   -- second layer pre-activation
   let z2 = (a1 `Mat.mul` w2) `Mat.addVec` b2
-  let scores = z2
 
   -- second layer activation
-  let exp_scores = scores <&&> exp
-  -- the hell is happening here...
-  let a2 = Mat.scale (1.0 / Vec.sum (Vec.tabulate \i -> exp_scores ! i ! _)) exp_scores
+  let z2_exp = z2 <&&> exp
+  let sums_of_exps = Vec.tabulate \i -> Vec.sum (z2_exp ! i)
+  let a2 = Mat.tabulate \i j -> (z2_exp ! i ! j) / sums_of_exps ! i
+
+  -- a2 corresponds to probabilities assigned to each output neuron (which each correspond to a classification label)
+
+  {-
+  cross-entropy loss: p log (phat) + q log (1 - phat)
+  where p = true label (indicator -- 1 => is label #0; 0 => isnt label #0)
+        phat = predicted probability that the input is labeled by label #0
+        q = true label (indicator -- 1 => is label #1; 0 => isnt label #1)
+        qhat = predicted probability that the input is labeled by label #1
+        qhat = 1 - phat
+  -}
+
+  let correct_logprobs = Vec.tabulate \i -> -log (a2 ! i ! (y ! i))
+  let data_loss = Vec.sum correct_logprobs / n_samples
+
+  -- how much to weight regularization loss vs data loss
+  let reg = 1
+
+  -- do regularization to penalize spiky (really big) weights
+  let l2_loss :: (SNatI m, SNatI n) => Mat m n Float -> Float
+      l2_loss w = Vec.sum (Vec.sum <$> (Mat.tabulate \i j -> (w ! i ! j) ^^ 2))
+  let reg_loss = (0.5 * reg * l2_loss w1) + (0.5 * reg * l2_loss w2)
+
+  let loss = data_loss + reg_loss
+
+  -- backward pass
+
+  let d_a2 :: Mat Samples OutputNeurons Float
+      d_a2 = Mat.tabulate \i j ->
+        ( if j == y ! i
+            then a2 ! i ! j - 1
+            else a2 ! i ! j
+        )
+          / n_samples
+
+  let grad_w2 =
+        let m = Mat.transpose a1 `Mat.mul` d_a2
+         in Mat.tabulate \i j -> m ! i ! j + reg * w2 ! i ! j
+  let grad_b2 = Vec.tabulate \i -> Vec.sum (Vec.tabulate \j -> d_a2 ! j ! i)
+
+  let d_hidden =
+        let m = d_a2 `Mat.mul` Mat.transpose w2
+         in Mat.tabulate \i j ->
+              if a1 ! i ! j <= 0
+                then 0
+                else m ! i ! j
+
+  let grad_w1 =
+        let m = Mat.transpose x `Mat.mul` d_hidden
+         in Mat.tabulate \i j -> m ! i ! j + reg * w1 ! i ! j
+  let grad_b1 = Vec.tabulate \i -> Vec.sum (Vec.tabulate \j -> d_hidden ! j ! i)
+
+  let w1' = Mat.tabulate \i j -> w1 ! i ! j - learning_rate * grad_w1 ! i ! j
+  let b1' = Vec.tabulate \i -> b1 ! i - learning_rate * grad_b1 ! i
+  let w2' = Mat.tabulate \i j -> w2 ! i ! j - learning_rate * grad_w2 ! i ! j
+  let b2' = Vec.tabulate \i -> b2 ! i - learning_rate * grad_b2 ! i
 
   return ()
 
--- main :: IO ()
--- main = do
---   let a :: Vec _ Float
---       a = 0.0 .: 0.0 .: 1.0 .: 1.0 .: Vec.empty
+step ::
+  ( Mat Samples InputNeurons Float,
+    Vec Samples (Fin OutputNeurons)
+  ) ->
+  (Mat InputNeurons HiddenNeurons Float, Vec HiddenNeurons Float, Mat HiddenNeurons OutputNeurons Float, Vec OutputNeurons Float) ->
+  (Mat InputNeurons HiddenNeurons Float, Vec HiddenNeurons Float, Mat HiddenNeurons OutputNeurons Float, Vec OutputNeurons Float)
+step (x, y) (w1, b1, w2, b2) =
+  -- forward pass
 
---       b :: Vec _ Float
---       b = 0.0 .: 1.0 .: 0.0 .: 1.0 .: Vec.empty
+  -- first layer pre-activation
+  let z1 = (x `Mat.mul` w1) `Mat.addVec` b1
 
---       y_xor :: Vec _ Float
---       y_xor = 0.0 .: 1.0 .: 1.0 .: 0.0 .: Vec.empty
+      -- first layer activation
+      relu = (<&&> max 0)
+      -- in this case, relu is the "activation function"
+      a1 = relu z1
 
---       total_input :: Mat InputNeurons Samples Float
---       total_input =
---         a
---           .: b
---           .: Vec.empty
+      -- second layer pre-activation
+      z2 = (a1 `Mat.mul` w2) `Mat.addVec` b2
 
---       samples :: Int
---       samples = total_input Vec.! 0 & length
+      -- second layer activation
+      z2_exp = z2 <&&> exp
+      sums_of_exps = Vec.tabulate \i -> Vec.sum (z2_exp ! i)
+      a2 = Mat.tabulate \i j -> (z2_exp ! i ! j) / sums_of_exps ! i
 
---       learning_rate :: Float
---       learning_rate = 0.1
+      -- a2 corresponds to probabilities assigned to each output neuron (which each correspond to a classification label)
 
---       iterations :: Int
---       iterations = 1000
+      {-
+      cross-entropy loss: p log (phat) + q log (1 - phat)
+      where p = true label (indicator -- 1 => is label #0; 0 => isnt label #0)
+            phat = predicted probability that the input is labeled by label #0
+            q = true label (indicator -- 1 => is label #1; 0 => isnt label #1)
+            qhat = predicted probability that the input is labeled by label #1
+            qhat = 1 - phat
+      -}
 
---   -- stdgen <- getStdGen
---   let stdgen = mkStdGen 111
---   seed <- newIOGenM stdgen
+      correct_logprobs = Vec.tabulate \i -> -log (a2 ! i ! (y ! i))
+      data_loss = Vec.sum correct_logprobs / n_samples
 
---   return ()
+      -- how much to weight regularization loss vs data loss
+      reg = 1
 
--- main :: IO ()
--- main = return ()
+      -- do regularization to penalize spiky (really big) weights
+      l2_loss :: (SNatI m, SNatI n) => Mat m n Float -> Float
+      l2_loss w = Vec.sum (Vec.sum <$> (Mat.tabulate \i j -> (w ! i ! j) ^^ 2))
+
+      reg_loss = (0.5 * reg * l2_loss w1) + (0.5 * reg * l2_loss w2)
+
+      loss = data_loss + reg_loss
+
+      -- backward pass
+
+      d_a2 :: Mat Samples OutputNeurons Float
+      d_a2 = Mat.tabulate \i j ->
+        ( if j == y ! i
+            then a2 ! i ! j - 1
+            else a2 ! i ! j
+        )
+          / n_samples
+
+      grad_w2 =
+        let m = Mat.transpose a1 `Mat.mul` d_a2
+         in Mat.tabulate \i j -> m ! i ! j + reg * w2 ! i ! j
+      grad_b2 = Vec.tabulate \i -> Vec.sum (Vec.tabulate \j -> d_a2 ! j ! i)
+
+      d_hidden =
+        let m = d_a2 `Mat.mul` Mat.transpose w2
+         in Mat.tabulate \i j ->
+              if a1 ! i ! j <= 0
+                then 0
+                else m ! i ! j
+
+      grad_w1 =
+        let m = Mat.transpose x `Mat.mul` d_hidden
+         in Mat.tabulate \i j -> m ! i ! j + reg * w1 ! i ! j
+      grad_b1 = Vec.tabulate \i -> Vec.sum (Vec.tabulate \j -> d_hidden ! j ! i)
+
+      w1' = Mat.tabulate \i j -> w1 ! i ! j - learning_rate * grad_w1 ! i ! j
+      b1' = Vec.tabulate \i -> b1 ! i - learning_rate * grad_b1 ! i
+      w2' = Mat.tabulate \i j -> w2 ! i ! j - learning_rate * grad_w2 ! i ! j
+      b2' = Vec.tabulate \i -> b2 ! i - learning_rate * grad_b2 ! i
+   in (w1', b1', w2', b2')
